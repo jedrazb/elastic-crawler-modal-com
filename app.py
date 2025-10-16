@@ -130,11 +130,14 @@ def run_crawler(crawl_config: Dict[str, Any]) -> Dict[str, Any]:
 # Define the web endpoint
 @app.function(
     image=web_image,
-    secrets=[modal.Secret.from_name("elasticsearch-config")],
+    secrets=[
+        modal.Secret.from_name("elasticsearch-config"),
+        modal.Secret.from_name("api-keys"),
+    ],
 )
 @modal.asgi_app()
 def crawl_endpoint():
-    from fastapi import FastAPI, HTTPException
+    from fastapi import FastAPI, HTTPException, Header, Depends
     from pydantic import BaseModel
 
     web_app = FastAPI()
@@ -149,8 +152,30 @@ def crawl_endpoint():
         max_url_length: int | None = None
         user_agent: str | None = None
 
+    async def verify_api_key(x_api_key: str = Header(None)):
+        """Verify API key from X-API-Key header"""
+        expected_key = os.environ.get("CRAWLER_API_KEY")
+
+        if not expected_key:
+            # If no API key configured, authentication is disabled
+            return True
+
+        if not x_api_key:
+            raise HTTPException(
+                status_code=401,
+                detail="Missing API key. Provide X-API-Key header.",
+                headers={"WWW-Authenticate": "ApiKey"},
+            )
+
+        if x_api_key != expected_key:
+            raise HTTPException(status_code=403, detail="Invalid API key")
+
+        return True
+
     @web_app.post("/")
-    async def trigger_crawl(config: CrawlConfig) -> Dict[str, Any]:
+    async def trigger_crawl(
+        config: CrawlConfig, authenticated: bool = Depends(verify_api_key)
+    ) -> Dict[str, Any]:
         """
         Web endpoint to trigger a crawl.
 

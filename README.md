@@ -19,12 +19,23 @@ pip install modal
 modal setup
 ```
 
-### 2. Configure Elasticsearch Credentials
+### 2. Configure Secrets
 
+**Elasticsearch credentials:**
 ```bash
 modal secret create elasticsearch-config \
   ELASTICSEARCH_HOST=https://your-cluster.es.region.elastic.cloud:443 \
   ELASTICSEARCH_API_KEY=your_base64_encoded_api_key
+```
+
+**API authentication (secure your endpoints):**
+```bash
+# Generate a secure API key
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# Create Modal secret with the key
+modal secret create api-keys \
+  CRAWLER_API_KEY=your_generated_api_key
 ```
 
 **Create API Key in Elasticsearch:**
@@ -61,6 +72,7 @@ modal app show elastic-crawler
 ```bash
 curl -X POST https://{username}--elastic-crawler-crawl-endpoint.modal.run \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: your_api_key" \
   -d '{
     "domains": [{
       "url": "https://example.com",
@@ -101,6 +113,7 @@ curl -X POST https://{username}--elastic-crawler-crawl-endpoint.modal.run \
 ```bash
 curl -X POST https://{username}--elastic-crawler-crawl-endpoint.modal.run \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: your_api_key" \
   -d '{
     "domains": [{
       "url": "https://docs.example.com"
@@ -164,19 +177,32 @@ First deployment takes 3-5 minutes (builds image + clones crawler repo). Subsequ
 
 ## Security
 
-- ✅ Elasticsearch credentials stored in Modal Secrets (never in code)
-- ✅ API responses sanitized (no credentials, no verbose logs)
-- ✅ Use Elasticsearch API keys (not username/password)
-- ⚠️ Endpoints are public by default - add auth for production:
+- ✅ **API Key Authentication** - Endpoints protected with `X-API-Key` header
+- ✅ **Elasticsearch Credentials** - Stored in Modal Secrets (never in code)
+- ✅ **Sanitized Responses** - No credentials or verbose logs leaked
+- ✅ **Secure Transport** - All traffic over HTTPS
 
+**How It Works:**
+1. Generate a secure API key: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
+2. Store it in Modal: `modal secret create api-keys CRAWLER_API_KEY=your_key`
+3. Include `X-API-Key` header in all requests
+4. Requests without valid API key receive 401/403 errors
+
+**From Your Server:**
 ```python
-from fastapi import Header, HTTPException
+import requests
 
-@web_app.post("/")
-async def trigger_crawl(config: CrawlConfig, x_api_key: str = Header(None)):
-    if x_api_key != os.environ.get("EXPECTED_API_KEY"):
-        raise HTTPException(status_code=401)
-    # ...
+response = requests.post(
+    "https://{username}--elastic-crawler-crawl-endpoint.modal.run",
+    headers={
+        "Content-Type": "application/json",
+        "X-API-Key": "your_api_key"
+    },
+    json={
+        "domains": [{"url": "https://example.com"}],
+        "output_index": "my-index"
+    }
+)
 ```
 
 ## Troubleshooting

@@ -31,6 +31,9 @@ ENV/
 *.env
 !env-template
 
+# Secrets and API keys
+API_KEY.md
+
 # IDE
 .vscode/
 .idea/
