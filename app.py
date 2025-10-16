@@ -31,8 +31,8 @@ web_image = modal.Image.debian_slim(python_version="3.11").pip_install(
     image=crawler_image,
     secrets=[modal.Secret.from_name("elasticsearch-config")],
     timeout=3600,  # 1 hour timeout for long crawls
-    memory=2048,  # 2GB memory
-    cpu=2.0,  # 2 CPUs
+    memory=1024,  # 1GB memory (actual usage ~0.6GB)
+    cpu=0.5,  # 0.5 CPU (actual usage ~0.15 cores)
 )
 def run_crawler(crawl_config: Dict[str, Any]) -> Dict[str, Any]:
     """
