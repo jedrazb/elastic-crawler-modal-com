@@ -1,0 +1,33 @@
+# Custom Dockerfile for Elastic Crawler with Python support for Modal
+# Uses Ubuntu + JRuby base for better compatibility
+
+# Start with Ubuntu and Python
+FROM python:3.11-slim
+
+# Install JRuby and dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    openjdk-21-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install JRuby
+ENV JRUBY_VERSION=9.4.8.0
+RUN curl -fsSL https://repo1.maven.org/maven2/org/jruby/jruby-dist/${JRUBY_VERSION}/jruby-dist-${JRUBY_VERSION}-bin.tar.gz \
+    | tar -xz -C /opt && \
+    ln -s /opt/jruby-${JRUBY_VERSION} /opt/jruby
+
+ENV PATH="/opt/jruby/bin:${PATH}"
+ENV JRUBY_OPTS="--dev"
+
+# Clone Elastic crawler to /crawler
+RUN git clone --depth=1 https://github.com/elastic/crawler.git /crawler
+
+# Set working directory
+WORKDIR /crawler
+
+# Install Ruby gems
+RUN jruby -S bundle install
+
+# Install Python dependencies for Modal
+RUN python3.11 -m pip install --no-cache-dir pyyaml

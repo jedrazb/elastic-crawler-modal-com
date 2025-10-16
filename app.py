@@ -15,11 +15,15 @@ from pathlib import Path
 # Create Modal app
 app = modal.App("elastic-crawler")
 
-# Use the official Elastic crawler Docker image
-crawler_image = modal.Image.from_registry(
-    "docker.elastic.co/integrations/crawler:latest",
-    add_python="3.11",  # Add Python for our API handler
-).pip_install("pyyaml")
+# Image for the crawler - use custom Dockerfile with Python installed
+# This builds from the standard (non-Wolfi) crawler image which is Ubuntu-based
+crawler_image = modal.Image.from_dockerfile("Dockerfile.modal")
+
+# Separate image for web endpoints
+web_image = modal.Image.debian_slim(python_version="3.11").pip_install(
+    "fastapi[standard]",
+    "pyyaml",
+)
 
 
 # Define the crawler function
@@ -61,7 +65,6 @@ def run_crawler(crawl_config: Dict[str, Any]) -> Dict[str, Any]:
         "elasticsearch": {
             "host": es_host,
             "api_key": es_api_key,
-            "pipeline_enabled": False,
         },
     }
 
@@ -73,22 +76,46 @@ def run_crawler(crawl_config: Dict[str, Any]) -> Dict[str, Any]:
         config_path = config_file.name
 
     try:
-        # Run the crawler
+        # Run the crawler (it's in /crawler)
         result = subprocess.run(
             ["jruby", "bin/crawler", "crawl", config_path],
-            cwd="/home/app",
+            cwd="/crawler",
             capture_output=True,
             text=True,
             timeout=3300,  # 55 minutes (less than function timeout)
         )
 
-        return {
+        # Extract crawl statistics from stdout for user feedback
+        crawl_stats = {}
+        if result.stdout:
+            # Parse basic stats from the output
+            for line in result.stdout.split("\n"):
+                if "Pages visited:" in line:
+                    crawl_stats["pages_visited"] = line.split(":")[-1].strip()
+                elif "Documents upserted:" in line:
+                    crawl_stats["documents_indexed"] = line.split(":")[-1].strip()
+                elif "Crawl duration" in line:
+                    crawl_stats["duration_seconds"] = line.split(":")[-1].strip()
+
+        # Return sanitized response (no credentials, no verbose logs)
+        response = {
             "status": "success" if result.returncode == 0 else "error",
             "return_code": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "config_used": full_config,
+            "output_index": crawl_config.get("output_index"),
+            "domains_crawled": [d.get("url") for d in crawl_config.get("domains", [])],
         }
+
+        # Add stats if available
+        if crawl_stats:
+            response["stats"] = crawl_stats
+
+        # Include error details only if failed
+        if result.returncode != 0:
+            response["error_message"] = (
+                result.stderr[:500] if result.stderr else "Crawl failed"
+            )
+
+        return response
 
     except subprocess.TimeoutExpired:
         return {"status": "error", "message": "Crawler execution timed out"}
@@ -102,49 +129,75 @@ def run_crawler(crawl_config: Dict[str, Any]) -> Dict[str, Any]:
 
 # Define the web endpoint
 @app.function(
+    image=web_image,
     secrets=[modal.Secret.from_name("elasticsearch-config")],
 )
-@modal.web_endpoint(method="POST")
-def crawl_endpoint(crawl_config: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Web endpoint to trigger a crawl.
+@modal.asgi_app()
+def crawl_endpoint():
+    from fastapi import FastAPI, HTTPException
+    from pydantic import BaseModel
 
-    POST payload should include:
-    {
-        "domains": [
-            {
-                "url": "https://example.com",
-                "seed_urls": ["https://example.com/page1"]
-            }
-        ],
-        "output_index": "my-crawler-index",
-        "crawl_rules": [...],  // optional
-        "extraction_rules": [...],  // optional
-        ... other crawler config options
-    }
+    web_app = FastAPI()
 
-    Returns:
-        Dictionary with crawl results
-    """
-    # Validate required fields
-    if "domains" not in crawl_config:
-        return {"status": "error", "message": "Missing required field: domains"}
+    class CrawlConfig(BaseModel):
+        domains: list
+        output_index: str
+        crawl_rules: list | None = None
+        extraction_rules: list | None = None
+        max_crawl_depth: int | None = None
+        max_duration_seconds: int | None = None
+        max_url_length: int | None = None
+        user_agent: str | None = None
 
-    if "output_index" not in crawl_config:
-        return {"status": "error", "message": "Missing required field: output_index"}
+    @web_app.post("/")
+    async def trigger_crawl(config: CrawlConfig) -> Dict[str, Any]:
+        """
+        Web endpoint to trigger a crawl.
 
-    # Run the crawler asynchronously
-    result = run_crawler.remote(crawl_config)
+        POST payload should include:
+        {
+            "domains": [
+                {
+                    "url": "https://example.com",
+                    "seed_urls": ["https://example.com/page1"]
+                }
+            ],
+            "output_index": "my-crawler-index",
+            "crawl_rules": [...],  // optional
+            "extraction_rules": [...],  // optional
+            ... other crawler config options
+        }
 
-    return result
+        Returns:
+            Dictionary with crawl results
+        """
+        # Convert Pydantic model to dict
+        crawl_config = config.model_dump(exclude_none=True)
+
+        # Run the crawler
+        result = run_crawler.remote(crawl_config)
+
+        return result
+
+    return web_app
 
 
 # Health check endpoint
-@app.function()
-@modal.web_endpoint(method="GET")
-def health() -> Dict[str, str]:
+@app.function(
+    image=web_image,
+)
+@modal.asgi_app()
+def health():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "elastic-crawler", "version": "1.0.0"}
+    from fastapi import FastAPI
+
+    web_app = FastAPI()
+
+    @web_app.get("/")
+    async def health_check() -> Dict[str, str]:
+        return {"status": "healthy", "service": "elastic-crawler", "version": "1.0.0"}
+
+    return web_app
 
 
 # CLI for local testing

@@ -1,26 +1,38 @@
 # Elastic Open Crawler on Modal.com
 
-Run the [Elastic Open Crawler](https://github.com/elastic/crawler) as a serverless API service on [Modal.com](https://modal.com).
+A serverless API wrapper for the [Elastic Open Crawler](https://github.com/elastic/crawler), deployed on [Modal.com](https://modal.com). Trigger web crawls via HTTP POST requests with results automatically indexed into Elasticsearch.
 
-This service allows you to trigger web crawls via API, with results automatically indexed into Elasticsearch. Elasticsearch configuration is managed via environment variables (Modal Secrets), while crawl configurations are provided dynamically via API requests.
+## Overview
 
-## 🌟 Features
+This service provides a stateless, serverless API for running web crawls using Elastic's official open-source crawler. Elasticsearch credentials are securely managed through Modal Secrets, while crawl configurations (target URLs, rules, extraction settings) are provided dynamically per request.
 
-- **API-driven crawling**: Trigger crawls via HTTP POST requests
-- **Serverless deployment**: Runs on Modal.com with automatic scaling
-- **Secure configuration**: Elasticsearch credentials stored as Modal Secrets
-- **Flexible crawl configs**: Each API call can crawl different websites with custom configurations
-- **Official Elastic crawler**: Uses the official `docker.elastic.co/integrations/crawler` image
-- **Production-ready**: Includes health checks, error handling, and timeout management
+## Key Features
 
-## 📋 Prerequisites
+- **Serverless Architecture** - Automatic scaling, zero infrastructure management
+- **API-First Design** - RESTful endpoints for triggering crawls and health checks
+- **Secure by Default** - Elasticsearch credentials managed via Modal Secrets
+- **Dynamic Configuration** - Different crawl configs per request (URLs, rules, extraction)
+- **Official Crawler** - Built on Elastic's open-source crawler with full feature support
+- **Production Ready** - 1-hour timeouts, comprehensive error handling, structured logging
+
+## Architecture
+
+The service uses a custom Docker image that combines:
+- **Python 3.11** (for Modal runtime)
+- **JRuby 9.4.8** (for Elastic crawler)
+- **Java 21** (JRuby dependency)
+- **Elastic Crawler** (cloned from official repository)
+
+This hybrid approach allows Modal's Python-based infrastructure to orchestrate the JRuby crawler seamlessly.
+
+## Prerequisites
 
 - Python 3.11+
-- [Modal.com account](https://modal.com) (free tier available)
-- Elasticsearch instance (Elastic Cloud, Serverless, or self-hosted)
-- Elasticsearch API key with appropriate permissions
+- [Modal.com account](https://modal.com)
+- Elasticsearch cluster (Cloud, Serverless, or self-hosted)
+- Elasticsearch API key with write permissions
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Install Dependencies
 
@@ -91,17 +103,17 @@ Or manually:
 modal deploy app.py
 ```
 
-### 6. Get Your Endpoint URLs
+### 6. Get Endpoint URLs
 
 ```bash
 modal app show elastic-crawler
 ```
 
-This will show your deployed endpoints:
-- Health check: `https://your-username--elastic-crawler-health.modal.run`
-- Crawl endpoint: `https://your-username--elastic-crawler-crawl-endpoint.modal.run`
+Your endpoints:
+- **Health**: `https://{username}--elastic-crawler-health.modal.run`
+- **Crawl**: `https://{username}--elastic-crawler-crawl-endpoint.modal.run`
 
-## 🔧 Usage
+## Usage
 
 ### Health Check
 
@@ -159,152 +171,134 @@ curl -X POST https://your-username--elastic-crawler-crawl-endpoint.modal.run \
   }'
 ```
 
-### Using the Test Script
+## API Reference
 
-```bash
-python test_api.py https://your-username--elastic-crawler-crawl-endpoint.modal.run
+### POST /crawl_endpoint
+
+Trigger a web crawl with custom configuration.
+
+**Required Fields:**
+- `domains` - Array of domain objects with `url` and optional `seed_urls`
+- `output_index` - Elasticsearch index name for crawled documents
+
+**Optional Fields:**
+- `crawl_rules` - URL filtering rules
+- `extraction_rules` - Content extraction rules
+- `max_crawl_depth` - Maximum link depth
+- `max_duration_seconds` - Crawl timeout
+- `user_agent` - Custom user agent
+
+**Response:**
+```json
+{
+  "status": "success",
+  "return_code": 0,
+  "output_index": "my-crawler-index",
+  "domains_crawled": ["https://example.com"],
+  "stats": {
+    "pages_visited": "5",
+    "documents_indexed": "5",
+    "duration_seconds": "2.3"
+  }
+}
 ```
 
-## 📝 Configuration Options
+See [Elastic Crawler Config Docs](https://github.com/elastic/crawler/blob/main/docs/CONFIG.md) for all available options.
 
-The crawl configuration accepts all options from the [Elastic Crawler configuration](https://github.com/elastic/crawler/blob/main/docs/CONFIG.md). Key options include:
+## Development
 
-### Required Fields
-
-- `domains`: List of domain configurations
-  - `url`: The base URL to crawl (required)
-  - `seed_urls`: List of starting URLs (optional, defaults to domain URL)
-- `output_index`: Elasticsearch index name for storing crawled documents
-
-### Optional Fields
-
-- `crawl_rules`: Rules to control which URLs are crawled
-- `extraction_rules`: Rules to extract specific content from pages
-- `max_crawl_depth`: Maximum depth to crawl (default: unlimited)
-- `max_duration_seconds`: Maximum crawl duration
-- `max_url_length`: Maximum URL length to crawl
-- `user_agent`: Custom user agent string
-- `http_auth`: HTTP authentication credentials
-
-See [example-config.yml](./example-config.yml) for a complete example.
-
-## 🛠️ Development
-
-### Local Testing
-
-Test your configuration locally before deploying:
-
-```bash
-modal run app.py --config-file example-config.yml
-```
-
-### View Logs
-
+**View Logs:**
 ```bash
 modal app logs elastic-crawler
 ```
 
-### Update Deployment
-
-After making changes to `app.py`:
-
+**Update Deployment:**
 ```bash
 modal deploy app.py
 ```
 
-## 📚 Project Structure
-
-```
-.
-├── app.py                 # Main Modal application
-├── requirements.txt       # Python dependencies
-├── example-config.yml     # Example crawl configuration
-├── env-template          # Template for environment variables
-├── deploy.sh             # Deployment script
-├── test_api.py           # API testing script
-└── README.md             # This file
+**Update Secrets:**
+```bash
+modal secret create elasticsearch-config \
+  ELASTICSEARCH_HOST=new-host \
+  ELASTICSEARCH_API_KEY=new-key
 ```
 
-## 🔐 Security Best Practices
+## Project Structure
 
-1. **Never commit credentials**: Keep your Elasticsearch credentials in Modal Secrets only
-2. **Use API keys**: Don't use username/password authentication
-3. **Limit permissions**: Grant only necessary permissions to your API key
-4. **Rate limiting**: Consider adding rate limiting to your API endpoint
-5. **Authentication**: Add authentication to your Modal endpoints in production
+```
+├── app.py                # Modal application (FastAPI endpoints + crawler orchestration)
+├── Dockerfile.modal      # Custom image (Python + JRuby + Elastic Crawler)
+├── requirements.txt      # Python dependencies (modal, pyyaml)
+├── example-config.yml    # Sample crawl configuration
+└── README.md            # Documentation
+```
 
-### Adding Authentication
+## Security Considerations
 
-To add authentication to your endpoints, modify `app.py`:
+- **Credentials**: Elasticsearch credentials stored exclusively in Modal Secrets
+- **API Keys**: Use Elasticsearch API keys (not username/password)
+- **Permissions**: Grant minimum required permissions (write to specific indices)
+- **Rate Limiting**: Consider adding rate limiting for production workloads
+- **Authentication**: Endpoints are public by default; add authentication if needed
+
+**Adding API Authentication:**
 
 ```python
-from modal import Secret
+@app.function(secrets=[modal.Secret.from_name("elasticsearch-config"),
+                       modal.Secret.from_name("api-keys")])
+@modal.asgi_app()
+def crawl_endpoint():
+    from fastapi import FastAPI, Header, HTTPException
 
-@app.function(
-    secrets=[
-        modal.Secret.from_name("elasticsearch-config"),
-        modal.Secret.from_name("api-keys")  # Add your API keys
-    ]
-)
-@modal.web_endpoint(method="POST")
-def crawl_endpoint(crawl_config: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
-    # Verify API key
-    api_key = headers.get("x-api-key")
-    if api_key != os.environ.get("EXPECTED_API_KEY"):
-        return {"status": "error", "message": "Unauthorized"}, 401
+    web_app = FastAPI()
 
-    # ... rest of the code
+    @web_app.post("/")
+    async def trigger_crawl(config: CrawlConfig, x_api_key: str = Header(None)):
+        if x_api_key != os.environ.get("EXPECTED_API_KEY"):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        # ... rest of implementation
 ```
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
-### Secret not found error
+**Deployment Errors:**
+- First deployment takes 3-5 minutes (builds custom image with git clone + bundle install)
+- Subsequent deployments use cached image (~2 seconds)
+- Modal caches images by content hash
 
-```bash
-# List your secrets
-modal secret list
+**Connection Issues:**
+- Verify `ELASTICSEARCH_HOST` format: `https://hostname:port`
+- Confirm API key has `write` and `create_index` permissions
+- Test connectivity: `curl -H "Authorization: ApiKey $API_KEY" $ES_HOST`
 
-# Create the secret if missing
-modal secret create elasticsearch-config \
-  ELASTICSEARCH_HOST=your-host \
-  ELASTICSEARCH_API_KEY=your-key
-```
+**Crawl Failures:**
+- Check Modal logs: `modal app logs elastic-crawler`
+- Verify target URL is accessible
+- Review `crawl_rules` for overly restrictive patterns
+- Check Elasticsearch index for error messages
 
-### Connection refused to Elasticsearch
+## Performance & Costs
 
-- Verify your `ELASTICSEARCH_HOST` includes protocol and port
-- Check that your API key has the correct permissions
-- Ensure your Elasticsearch instance is accessible from Modal's infrastructure
+- **Cold Start**: ~10-15 seconds (first request after idle period)
+- **Warm Requests**: <1 second API response (crawl runs async)
+- **Image Build**: 3-5 minutes (first deployment only, cached thereafter)
+- **Crawl Duration**: Depends on site size; typically seconds to minutes
+- **Modal Costs**: Based on compute time (CPU-seconds) + container memory
 
-### Timeout errors
+## Additional Resources
 
-- Increase the timeout in `app.py` (default: 3600 seconds)
-- Use `max_duration_seconds` in your crawl config to limit crawl time
-- Consider crawling in smaller batches
+- **Crawler**: [Elastic Open Crawler Docs](https://github.com/elastic/crawler)
+- **Configuration**: [Crawler Config Reference](https://github.com/elastic/crawler/blob/main/docs/CONFIG.md)
+- **Platform**: [Modal Documentation](https://modal.com/docs)
+- **Elasticsearch**: [API Keys Guide](https://www.elastic.co/guide/en/elasticsearch/reference/current/security-api-create-api-key.html)
 
-### Container build errors
+## License
 
-- Modal will automatically pull the latest crawler image
-- If you see cache issues, try: `modal app build elastic-crawler --force-build`
+This integration is provided as-is. The Elastic Open Crawler is licensed under [Elastic License 2.0](https://github.com/elastic/crawler/blob/main/LICENSE).
 
-## 📖 Additional Resources
+## Support
 
-- [Elastic Open Crawler Documentation](https://github.com/elastic/crawler)
-- [Elastic Crawler Configuration Guide](https://github.com/elastic/crawler/blob/main/docs/CONFIG.md)
-- [Modal.com Documentation](https://modal.com/docs)
-- [Elasticsearch API Keys](https://www.elastic.co/guide/en/elasticsearch/reference/current/security-api-create-api-key.html)
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📄 License
-
-This project follows the same license as the Elastic Open Crawler.
-
-## 💬 Support
-
-For issues related to:
-- **This Modal integration**: Open an issue in this repository
-- **Elastic Open Crawler**: See the [Elastic Crawler repository](https://github.com/elastic/crawler)
-- **Modal.com platform**: Check [Modal documentation](https://modal.com/docs) or their [Slack community](https://modal.com/slack)
+- **Integration Issues**: Open an issue in this repository
+- **Crawler Questions**: See [elastic/crawler](https://github.com/elastic/crawler)
+- **Modal Platform**: [Modal Docs](https://modal.com/docs) | [Slack Community](https://modal.com/slack)
