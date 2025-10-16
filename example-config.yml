@@ -1,0 +1,29 @@
+# Example crawl configuration
+# This shows the minimal configuration needed to crawl a website
+# Elasticsearch credentials are provided via environment variables in Modal
+
+domains:
+  - url: https://querybox-app.vercel.app
+    seed_urls:
+      - https://querybox-app.vercel.app
+
+# Required: The Elasticsearch index name where documents will be stored
+output_index: querybox-crawler-querybox-app_vercel_app
+# Optional: Add crawl rules to control which URLs are crawled
+# crawl_rules:
+#   - policy: allow
+#     type: regex
+#     pattern: ".*"
+
+# Optional: Add extraction rules to extract specific content
+# extraction_rules:
+#   - action: extract
+#     field_name: custom_field
+#     selector:
+#       type: css
+#       value: ".my-class"
+
+# Optional: Configure crawl behavior
+# max_crawl_depth: 10
+# max_duration_seconds: 3600
+# max_url_length: 2048

@@ -1,0 +1,6 @@
+# Elasticsearch Configuration
+# These values will be used to create Modal secrets
+# DO NOT commit actual credentials to version control
+
+ELASTICSEARCH_HOST=https://your-deployment.es.region.cloud.elastic.cloud:443
+ELASTICSEARCH_API_KEY=your_base64_encoded_api_key_here
