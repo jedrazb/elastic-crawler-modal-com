@@ -67,10 +67,24 @@ modal app show elastic-crawler
 
 ## API Reference
 
-### Trigger a Crawl
+### Why Async Mode?
+
+Crawls can take seconds to minutes depending on site size. **Async mode** (default) returns immediately with an execution ID, letting you:
+
+- ✅ Show progress/spinner in your UI while crawling
+- ✅ Handle browser refreshes (just poll with the execution_id)
+- ✅ Avoid HTTP timeouts on long crawls
+- ✅ Run multiple crawls concurrently
+
+**Perfect for:** User-initiated crawls from web apps, scheduled crawls with progress tracking
+
+### Trigger a Crawl (Async - Recommended)
+
+Use async mode to get an execution ID immediately:
 
 ```bash
-curl -X POST https://{username}--elastic-crawler-crawl-endpoint.modal.run \
+# Start the crawl (returns immediately with execution_id)
+curl -X POST "https://{username}--elastic-crawler-crawl-endpoint.modal.run?async_mode=true" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your_api_key" \
   -d '{
@@ -82,6 +96,79 @@ curl -X POST https://{username}--elastic-crawler-crawl-endpoint.modal.run \
   }'
 ```
 
+**Response:**
+```json
+{
+  "status": "started",
+  "execution_id": "fc-01K7PD9T0DRBHMWX6AG65BP083",
+  "message": "Crawl started successfully",
+  "check_status_url": "/status/fc-01K7PD9T0DRBHMWX6AG65BP083"
+}
+```
+
+### Check Crawl Status
+
+Poll this endpoint to check if your crawl is still running or completed:
+
+```bash
+curl "https://{username}--elastic-crawler-crawl-endpoint.modal.run/status/{execution_id}" \
+  -H "X-API-Key: your_api_key"
+```
+
+**While Running:**
+```json
+{
+  "status": "running",
+  "execution_id": "fc-01K7PD9T0DRBHMWX6AG65BP083",
+  "message": "Crawl is still in progress"
+}
+```
+
+**When Completed:**
+```json
+{
+  "status": "completed",
+  "result": {
+    "status": "success",
+    "return_code": 0,
+    "output_index": "my-crawler-index",
+    "domains_crawled": ["https://example.com"],
+    "stats": {
+      "pages_visited": "15",
+      "documents_indexed": "15",
+      "duration_seconds": "8.2"
+    }
+  }
+}
+```
+
+**If Failed:**
+```json
+{
+  "status": "failed",
+  "execution_id": "fc-01K7PD9T0DRBHMWX6AG65BP083",
+  "error": "Error message"
+}
+```
+
+### Trigger a Crawl (Sync)
+
+For quick crawls only. Waits for completion (may timeout on long crawls):
+
+```bash
+curl -X POST "https://{username}--elastic-crawler-crawl-endpoint.modal.run?async_mode=false" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your_api_key" \
+  -d '{
+    "domains": [{
+      "url": "https://example.com"
+    }],
+    "output_index": "my-crawler-index"
+  }'
+```
+
+### Configuration Options
+
 **Required:**
 - `domains` - Array with `url` (required), `seed_urls` (optional)
 - `output_index` - Elasticsearch index name
@@ -92,21 +179,6 @@ curl -X POST https://{username}--elastic-crawler-crawl-endpoint.modal.run \
 - `max_crawl_depth` - Link depth limit
 - `max_duration_seconds` - Timeout
 - `user_agent` - Custom user agent
-
-**Response:**
-```json
-{
-  "status": "success",
-  "return_code": 0,
-  "output_index": "my-crawler-index",
-  "domains_crawled": ["https://example.com"],
-  "stats": {
-    "pages_visited": "15",
-    "documents_indexed": "15",
-    "duration_seconds": "8.2"
-  }
-}
-```
 
 ### Advanced: Crawl Rules
 
@@ -129,6 +201,14 @@ curl -X POST https://{username}--elastic-crawler-crawl-endpoint.modal.run \
 ```
 
 Full configuration options: [Elastic Crawler Config Docs](https://github.com/elastic/crawler/blob/main/docs/CONFIG.md)
+
+**💡 Try the Example Script:**
+
+```bash
+python3 example_async_crawl.py https://example.com my-index
+```
+
+This script demonstrates the complete async workflow: start crawl → poll for status → get results.
 
 ### Health Check
 
@@ -188,12 +268,15 @@ First deployment takes 3-5 minutes (builds image + clones crawler repo). Subsequ
 3. Include `X-API-Key` header in all requests
 4. Requests without valid API key receive 401/403 errors
 
-**From Your Server:**
+**Example: Async Crawl with Polling**
+
 ```python
 import requests
+import time
 
+# Start the crawl
 response = requests.post(
-    "https://{username}--elastic-crawler-crawl-endpoint.modal.run",
+    "https://{username}--elastic-crawler-crawl-endpoint.modal.run?async_mode=true",
     headers={
         "Content-Type": "application/json",
         "X-API-Key": "your_api_key"
@@ -203,6 +286,30 @@ response = requests.post(
         "output_index": "my-index"
     }
 )
+
+data = response.json()
+execution_id = data["execution_id"]
+print(f"Crawl started: {execution_id}")
+
+# Poll for status
+while True:
+    status_response = requests.get(
+        f"https://{{username}}--elastic-crawler-crawl-endpoint.modal.run/status/{execution_id}",
+        headers={"X-API-Key": "your_api_key"}
+    )
+
+    status_data = status_response.json()
+
+    if status_data["status"] == "completed":
+        print("Crawl completed!")
+        print(status_data["result"])
+        break
+    elif status_data["status"] == "failed":
+        print(f"Crawl failed: {status_data['error']}")
+        break
+    else:
+        print("Crawl still running...")
+        time.sleep(5)  # Check every 5 seconds
 ```
 
 ## Troubleshooting

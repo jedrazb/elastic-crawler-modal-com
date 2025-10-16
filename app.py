@@ -174,10 +174,16 @@ def crawl_endpoint():
 
     @web_app.post("/")
     async def trigger_crawl(
-        config: CrawlConfig, authenticated: bool = Depends(verify_api_key)
+        config: CrawlConfig,
+        async_mode: bool = True,
+        authenticated: bool = Depends(verify_api_key),
     ) -> Dict[str, Any]:
         """
         Web endpoint to trigger a crawl.
+
+        Query params:
+        - async_mode: If true (default), returns immediately with execution_id.
+                      If false, waits for completion (may timeout for long crawls).
 
         POST payload should include:
         {
@@ -193,16 +199,72 @@ def crawl_endpoint():
             ... other crawler config options
         }
 
-        Returns:
+        Returns (async_mode=true):
+            {"status": "started", "execution_id": "...", "check_url": "..."}
+
+        Returns (async_mode=false):
             Dictionary with crawl results
         """
         # Convert Pydantic model to dict
         crawl_config = config.model_dump(exclude_none=True)
 
-        # Run the crawler
-        result = run_crawler.remote(crawl_config)
+        if async_mode:
+            # Start crawl asynchronously and return immediately
+            function_call = run_crawler.spawn(crawl_config)
+            execution_id = function_call.object_id
 
-        return result
+            return {
+                "status": "started",
+                "execution_id": execution_id,
+                "message": "Crawl started successfully",
+                "check_status_url": f"/status/{execution_id}",
+            }
+        else:
+            # Run synchronously (wait for completion)
+            result = run_crawler.remote(crawl_config)
+            return result
+
+    @web_app.get("/status/{execution_id}")
+    async def check_status(
+        execution_id: str, authenticated: bool = Depends(verify_api_key)
+    ) -> Dict[str, Any]:
+        """
+        Check the status of a running crawl.
+
+        Returns:
+        - status: "running", "completed", "failed"
+        - result: (only if completed) crawl results
+        - error: (only if failed) error message
+        """
+        from modal.functions import FunctionCall
+
+        try:
+            function_call = FunctionCall.from_id(execution_id)
+
+            # Try to get the result (non-blocking check)
+            try:
+                result = function_call.get(timeout=0)
+                return {"status": "completed", "result": result}
+            except TimeoutError:
+                # Still running
+                return {
+                    "status": "running",
+                    "execution_id": execution_id,
+                    "message": "Crawl is still in progress",
+                }
+            except Exception as e:
+                # Failed
+                return {
+                    "status": "failed",
+                    "execution_id": execution_id,
+                    "error": str(e),
+                }
+
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Could not find execution: {str(e)}",
+            }
 
     return web_app
 
