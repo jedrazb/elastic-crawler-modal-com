@@ -150,6 +150,7 @@ def crawl_endpoint():
         max_crawl_depth: int | None = None
         max_duration_seconds: int | None = None
         max_url_length: int | None = None
+        max_unique_url_count: int | None = None
         user_agent: str | None = None
 
     async def verify_api_key(x_api_key: str = Header(None)):
